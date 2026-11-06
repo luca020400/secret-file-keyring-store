@@ -3,9 +3,8 @@
 mod secret;
 
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use rand::TryRng;
@@ -233,14 +232,16 @@ impl PortalService {
         };
 
         let bytes = serde_json::to_vec(&envelope).map_err(platform_failure)?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&self.keyring_file)
-            .map_err(platform_failure)?;
-        file.write_all(&bytes).map_err(platform_failure)?;
+
+        let parent = self
+            .keyring_file
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(platform_failure)?;
+        temp.write_all(&bytes).map_err(platform_failure)?;
+        temp.as_file().sync_all().map_err(platform_failure)?;
+        temp.persist(&self.keyring_file).map_err(platform_failure)?;
 
         Ok(())
     }
@@ -259,7 +260,6 @@ fn read_envelope(keyring_file: &Path) -> Result<Option<Envelope>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(platform_failure(e)),
     };
-
     let envelope: Envelope =
         serde_json::from_slice(&bytes).map_err(|err| Error::BadStoreFormat(err.to_string()))?;
     if envelope.version != VERSION {

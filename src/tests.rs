@@ -8,11 +8,7 @@ use keyring_core::{CredentialStore, Entry, Error, api::CredentialPersistence, ge
 static SET_STORE: Once = Once::new();
 
 fn configured_store() -> Arc<Store> {
-    let keyring_file = std::env::temp_dir().join(format!(
-        "keyring-store-tests-{}-{}.json",
-        std::process::id(),
-        generate_random_string()
-    ));
+    let keyring_file = std::env::temp_dir().join("keyring-store-tests.json");
     Arc::new(Store {
         id: generate_random_string(),
         service: Arc::new(crate::service::Service::new(&keyring_file).unwrap()),

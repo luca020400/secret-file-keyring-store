@@ -3,9 +3,12 @@
 mod secret;
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+
+use rustix::fs::{FlockOperation, flock};
 
 use rand::TryRng;
 use rand::rngs::SysRng;
@@ -23,6 +26,7 @@ use keyring_core::error::{Error, Result};
 /// An encrypted credential store unlocked through the desktop Secret portal.
 pub(super) struct PortalService {
     keyring_file: PathBuf,
+    lock_file: PathBuf,
     key: [u8; KEY_LEN],
     salt: [u8; SALT_LEN],
 }
@@ -32,6 +36,11 @@ impl PortalService {
     ///
     /// This blocks while the portal responds and may prompt the user for access.
     pub(super) fn new(keyring_file: &Path) -> Result<Self> {
+        let mut lock_file = keyring_file.as_os_str().to_os_string();
+        lock_file.push(".lock");
+        let lock_file = PathBuf::from(lock_file);
+        let _lock = lock(&lock_file, FlockOperation::LockExclusive)?;
+
         let keyring_file = keyring_file.to_path_buf();
         let existing = read_envelope(&keyring_file)?;
         let previous_token = existing.as_ref().and_then(|e| e.token.as_deref());
@@ -47,6 +56,7 @@ impl PortalService {
 
         let store = Self {
             keyring_file,
+            lock_file,
             key: derive(&secret, &salt),
             salt,
         };
@@ -66,6 +76,7 @@ impl PortalService {
     }
 
     pub(super) fn find_matching_items(&self, attributes: &HashMap<&str, &str>) -> Result<Vec<u64>> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockShared)?;
         let (_, records) = self.load()?;
         Ok(records
             .iter()
@@ -85,6 +96,7 @@ impl PortalService {
         attributes: HashMap<&str, &str>,
         secret: &[u8],
     ) -> Result<()> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockExclusive)?;
         let (mut envelope, mut records) = self.load()?;
         let id = envelope.next_id;
         envelope.next_id = id
@@ -104,6 +116,7 @@ impl PortalService {
     }
 
     pub(super) fn delete_collection(&self, collection: &str) -> Result<()> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockExclusive)?;
         if collection.eq("default") {
             return Err(Error::NotSupportedByStore(
                 "You cannot delete the default collection".to_string(),
@@ -119,12 +132,14 @@ impl PortalService {
 
     /// Given an item's ID, ensure it exists
     pub(super) fn ensure_exists(&self, id: u64) -> Result<()> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockShared)?;
         let (_, records) = self.load()?;
         position(&records, id).map(|_| ())
     }
 
     /// Given an item's ID, set its secret.
     pub(super) fn set_secret(&self, id: u64, secret: &[u8]) -> Result<()> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockExclusive)?;
         let (envelope, mut records) = self.load()?;
         let index = position(&records, id)?;
         records[index].secret = secret.to_vec();
@@ -133,6 +148,7 @@ impl PortalService {
 
     /// Given an existing item's ID, retrieve its secret.
     pub(super) fn get_secret(&self, id: u64) -> Result<Vec<u8>> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockShared)?;
         let (_, records) = self.load()?;
         let item = &records[position(&records, id)?];
         Ok(item.secret.clone())
@@ -140,6 +156,7 @@ impl PortalService {
 
     /// Given an existing item's ID, retrieve its attributes.
     pub(super) fn get_attributes(&self, id: u64) -> Result<HashMap<String, String>> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockShared)?;
         let (_, records) = self.load()?;
         let item = &records[position(&records, id)?];
         Ok(item.attributes.clone())
@@ -151,6 +168,7 @@ impl PortalService {
         id: u64,
         attributes: &HashMap<&str, &str>,
     ) -> Result<()> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockExclusive)?;
         let (envelope, mut records) = self.load()?;
         let index = position(&records, id)?;
         let item = &mut records[index];
@@ -162,6 +180,7 @@ impl PortalService {
 
     // Given an existing item's ID, delete it.
     pub(super) fn delete(&self, id: u64) -> Result<()> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockExclusive)?;
         let (envelope, mut records) = self.load()?;
         records.remove(position(&records, id)?);
         self.save(&records, envelope.token.as_deref(), envelope.next_id)
@@ -169,6 +188,7 @@ impl PortalService {
 
     // Given an existing item's ID, return its label.
     pub(super) fn get_label(&self, id: u64) -> Result<String> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockShared)?;
         let (_, records) = self.load()?;
         let item = &records[position(&records, id)?];
         Ok(item.label.clone())
@@ -176,6 +196,7 @@ impl PortalService {
 
     // Given an existing item's ID, set its label.
     pub(super) fn set_label(&self, id: u64, label: &str) -> Result<()> {
+        let _lock = lock(&self.lock_file, FlockOperation::LockExclusive)?;
         let (envelope, mut records) = self.load()?;
         let index = position(&records, id)?;
         records[index].label = label.to_string();
@@ -252,6 +273,19 @@ impl PortalService {
         let records = self.decrypt(&envelope)?;
         Ok((envelope, records))
     }
+}
+
+fn lock(lock_file: &Path, operation: FlockOperation) -> Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(lock_file)
+        .map_err(platform_failure)?;
+    flock(&file, operation).map_err(platform_failure)?;
+    Ok(file)
 }
 
 fn read_envelope(keyring_file: &Path) -> Result<Option<Envelope>> {

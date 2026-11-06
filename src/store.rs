@@ -30,7 +30,8 @@ impl Store {
     /// Create a store with the specified configuration.
     ///
     /// The required `keyring-file` key names the portal backend's encrypted JSON file.
-    /// The file is created if needed; its parent directory must already exist.
+    /// The file and a sibling `<keyring-file>.lock` file are created if needed;
+    /// their parent directory must already exist.
     /// No other configuration keys are supported.
     pub fn new_with_configuration(config: &HashMap<&str, &str>) -> Result<Arc<Self>> {
         if config.keys().any(|key| *key != "keyring-file") {

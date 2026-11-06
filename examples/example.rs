@@ -7,7 +7,10 @@ use zbus_secret_service_keyring_store::{Store, cred::Specifier};
 
 fn main() {
     // Set secret service backend as the default store
-    keyring_core::set_default_store(Store::new().unwrap());
+    keyring_core::set_default_store(
+        Store::new_with_configuration(&HashMap::from([("keyring-file", "./keyring-store.json")]))
+            .unwrap(),
+    );
 
     let service = "service-name";
     let user = "user-name";

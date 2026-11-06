@@ -7,8 +7,35 @@ use keyring_core::{CredentialStore, Entry, Error, api::CredentialPersistence, ge
 
 static SET_STORE: Once = Once::new();
 
+fn configured_store() -> Arc<Store> {
+    let keyring_file =
+        std::env::temp_dir().join(format!("keyring-store-tests-{}.json", std::process::id()));
+    Store::new_with_configuration(&HashMap::from([(
+        "keyring-file",
+        keyring_file.to_str().unwrap(),
+    )]))
+    .unwrap()
+}
+
+#[test]
+fn test_required_keyring_file_configuration() {
+    assert!(matches!(Store::new(), Err(Error::NotSupportedByStore(_))));
+    for config in [HashMap::new(), HashMap::from([("keyring-file", "")])] {
+        assert!(
+            matches!(Store::new_with_configuration(&config), Err(Error::Invalid(key, _)) if key == "keyring-file")
+        );
+    }
+    assert!(matches!(
+        Store::new_with_configuration(&HashMap::from([
+            ("keyring-file", "/tmp/store"),
+            ("unknown", "value")
+        ])),
+        Err(Error::NotSupportedByStore(_))
+    ));
+}
+
 fn usually_goes_in_main() {
-    keyring_core::set_default_store(Store::new().unwrap());
+    keyring_core::set_default_store(configured_store());
 }
 
 #[test]
@@ -21,7 +48,7 @@ fn test_store_methods() {
     let id1b = store.id();
     assert_eq!(vendor1a, vendor1b);
     assert_eq!(id1a, id1b);
-    let store2: Arc<CredentialStore> = Store::new().unwrap();
+    let store2: Arc<CredentialStore> = configured_store();
     let vendor2 = store2.vendor();
     let id2 = store2.id();
     assert_eq!(vendor1a, vendor2);
@@ -443,7 +470,7 @@ fn test_simultaneous_multiple_create_delete_single_thread() {
 
 #[test]
 fn test_persistence() {
-    let store: Arc<CredentialStore> = Store::new().unwrap();
+    let store: Arc<CredentialStore> = configured_store();
     assert!(matches!(
         store.persistence(),
         CredentialPersistence::UntilDelete

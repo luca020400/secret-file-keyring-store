@@ -10,7 +10,10 @@ use keyring_core::{Entry, Error, Result, set_default_store};
 use zbus_secret_service_keyring_store::Store;
 
 fn main() -> Result<()> {
-    set_default_store(Store::new()?);
+    set_default_store(Store::new_with_configuration(&HashMap::from([(
+        "keyring-file",
+        "./keyring-store.json",
+    )]))?);
     let (names, entries) = find_candidates()?;
     let args = std::env::args().skip(1).collect::<Vec<String>>();
     if args.len() > 1 {

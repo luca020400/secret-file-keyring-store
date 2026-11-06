@@ -22,15 +22,17 @@ pub fn empty_target() -> Error {
     Error::Invalid("target".to_string(), "cannot be empty".to_string())
 }
 
-/// Wrap a secret-service error as a platform failure.
-pub fn platform_failure(err: ServiceError) -> Error {
+/// Wrap an underlying backend error as a platform failure.
+pub fn platform_failure(err: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::PlatformFailure(wrap(err))
 }
 
-fn no_access(err: ServiceError) -> Error {
+fn no_access(err: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::NoStorageAccess(wrap(err))
 }
 
-fn wrap(err: ServiceError) -> Box<dyn std::error::Error + Send + Sync> {
+fn wrap(
+    err: impl std::error::Error + Send + Sync + 'static,
+) -> Box<dyn std::error::Error + Send + Sync> {
     Box::new(err)
 }

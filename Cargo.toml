@@ -9,7 +9,7 @@ rust-version = "1.88"
 exclude = [".github/"]
 readme = "README.md"
 name = "zbus-secret-portal-keyring-store"
-version = "1.0.1"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]

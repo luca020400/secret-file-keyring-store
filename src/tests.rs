@@ -8,18 +8,19 @@ use keyring_core::{CredentialStore, Entry, Error, api::CredentialPersistence, ge
 static SET_STORE: Once = Once::new();
 
 fn configured_store() -> Arc<Store> {
-    let keyring_file =
-        std::env::temp_dir().join(format!("keyring-store-tests-{}.json", std::process::id()));
-    Store::new_with_configuration(&HashMap::from([(
-        "keyring-file",
-        keyring_file.to_str().unwrap(),
-    )]))
-    .unwrap()
+    let keyring_file = std::env::temp_dir().join(format!(
+        "keyring-store-tests-{}-{}.json",
+        std::process::id(),
+        generate_random_string()
+    ));
+    Arc::new(Store {
+        id: generate_random_string(),
+        service: Arc::new(crate::service::Service::new(&keyring_file).unwrap()),
+    })
 }
 
 #[test]
 fn test_required_keyring_file_configuration() {
-    assert!(matches!(Store::new(), Err(Error::NotSupportedByStore(_))));
     for config in [HashMap::new(), HashMap::from([("keyring-file", "")])] {
         assert!(
             matches!(Store::new_with_configuration(&config), Err(Error::Invalid(key, _)) if key == "keyring-file")
@@ -275,7 +276,6 @@ fn test_get_credential_and_specifiers_and_label() {
 }
 
 #[test]
-#[ignore = "Requires user interaction"]
 fn test_entries_with_and_without_targets() {
     let name1 = generate_random_string();
     let name2 = generate_random_string();

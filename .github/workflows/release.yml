@@ -40,6 +40,6 @@ jobs:
         id: auth
 
       - name: Publish
-        run: cargo publish --features crypto-rust
+        run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

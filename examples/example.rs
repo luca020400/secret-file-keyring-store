@@ -1,12 +1,12 @@
 //! Example CLI app that creates, writes, reads, examines, and deletes an entry
-//! in the keyutils keystore using APIs from the keyring crate.
+//! in a keyring file.
 use std::collections::HashMap;
 
 use keyring_core::{Entry, Error};
-use zbus_secret_service_keyring_store::{Store, cred::Specifier};
+use zbus_secret_portal_keyring_store::{Store, cred::Specifier};
 
 fn main() {
-    // Set secret service backend as the default store
+    // Set the secret portal store as the default store
     keyring_core::set_default_store(
         Store::new_with_configuration(&HashMap::from([("keyring-file", "./keyring-store.json")]))
             .unwrap(),

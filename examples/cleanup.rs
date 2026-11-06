@@ -1,4 +1,4 @@
-//! Example CLI app that finds and prints Windows generic credentials
+//! Example CLI app that finds and prints credentials in the encrypted keyring file
 //! that were probably created while testing this crate.
 //! You can specify arguments to delete the entries (`-h` or `--help` for usage).
 use std::collections::HashMap;
@@ -7,7 +7,7 @@ use regex::Regex;
 use sscanf::sscanf;
 
 use keyring_core::{Entry, Error, Result, set_default_store};
-use zbus_secret_service_keyring_store::Store;
+use zbus_secret_portal_keyring_store::Store;
 
 fn main() -> Result<()> {
     set_default_store(Store::new_with_configuration(&HashMap::from([(

@@ -18,9 +18,6 @@ jobs:
   ci_stable:
     strategy:
       matrix:
-        features:
-          - "crypto-rust"
-          - "crypto-openssl"
         platform:
           - ubuntu-latest
           - ubuntu-24.04-arm
@@ -29,11 +26,6 @@ jobs:
       - ${{ matrix.platform }}
 
     steps:
-      - name: install required packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev
-
       - name: Fetch head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,38 +41,18 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy check
-        run: cargo clippy --features=${{ matrix.features }} --no-deps --all-targets -- -D warnings
-
-      - name: Install gnome-keyring
-        run: sudo apt-get install -y gnome-keyring
-
-      - name: Start gnome-keyring
-        # run gnome-keyring with 'foobar' as the password for the login keyring
-        # this will create a new login keyring and unlock it
-        # the login password doesn't matter, but the keyring must be unlocked for the tests to work
-        run: gnome-keyring-daemon --components=secrets --daemonize --unlock <<< 'foobar'
+        run: cargo clippy --no-deps --all-targets -- -D warnings
 
       - name: Build and Test
-        run: cargo test --features=${{ matrix.features }} --verbose
+        run: cargo test --verbose
 
       - name: Build examples
-        run: cargo build --features=${{ matrix.features }} --examples --verbose
+        run: cargo build --examples --verbose
 
   ci_msrv:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        features:
-          - "crypto-rust"
-          - "crypto-openssl"
-
     steps:
-      - name: install required packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev
-
       - name: Fetch head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,7 +65,7 @@ jobs:
           components: clippy
 
       - name: Clippy check
-        run: cargo clippy --features=${{ matrix.features }} --no-deps --all-targets -- -D warnings
+        run: cargo clippy --no-deps --all-targets -- -D warnings
 
   ci-success:
     if: always()

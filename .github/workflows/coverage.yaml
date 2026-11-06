@@ -34,21 +34,8 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Install required packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev
-          sudo apt-get install -y gnome-keyring
-
-      - name: Start gnome-keyring
-        # the login keyring must be unlocked for the tests to work
-        run: gnome-keyring-daemon --components=secrets --daemonize --unlock <<< 'foobar'
-
-      - name: Test with the crypto-rust feature
-        run: cargo llvm-cov --no-report --features=crypto-rust --verbose
-
-      - name: Test with the crypto-openssl feature
-        run: cargo llvm-cov --no-report --features=crypto-openssl --verbose
+      - name: Test
+        run: cargo llvm-cov --no-report --verbose
 
       - name: Write the coverage report
         run: cargo llvm-cov report --lcov --output-path lcov.info

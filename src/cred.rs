@@ -1,21 +1,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use zbus::zvariant::OwnedObjectPath;
-
 use keyring_core::Entry;
 use keyring_core::api::{Credential, CredentialApi};
 use keyring_core::error::{Error, Result};
 
 use crate::service::Service;
 
-/// The specifier for an item in the secret-service.
+/// The specifier for an item in the keyring file.
 ///
 /// The label and target are captured from the modifiers
 /// used when the specifier was created, so they are
 /// available when a matching item needs to be created.
 pub struct Specifier {
-    ss: Arc<Service<'static>>,
+    store: Arc<Service>,
     /// The label given to an item created for the entry.
     pub label: String,
     /// The collection the item is created in, or `None` for the default collection.
@@ -40,7 +38,7 @@ impl std::fmt::Debug for Specifier {
 impl Specifier {
     /// Create a specifier.
     pub(crate) fn new(
-        ss: Arc<Service<'static>>,
+        store: Arc<Service>,
         label: Option<&str>,
         target: Option<&str>,
         service: &str,
@@ -51,7 +49,7 @@ impl Specifier {
             Some(l) => l.to_string(),
         };
         Arc::new(Self {
-            ss,
+            store,
             label,
             target: target.map(|s| s.to_string()),
             service: service.to_string(),
@@ -63,8 +61,8 @@ impl Specifier {
     ///
     /// This may or may not match the one in the specifier.
     pub fn get_label(&self) -> Result<String> {
-        let path = self.get_unique_item()?;
-        self.ss.get_label(&path)
+        let id = self.get_unique_item()?;
+        self.store.get_label(id)
     }
 
     /// Sets the label on an existing, matching item.
@@ -72,29 +70,29 @@ impl Specifier {
     /// Note that this doesn't update the specifier. If you delete
     /// the item and recreate it, the label will come from the specifier.
     pub fn set_label(&self, label: &str) -> Result<()> {
-        let path = self.get_unique_item()?;
-        self.ss.set_label(&path, label)
+        let id = self.get_unique_item()?;
+        self.store.set_label(id, label)
     }
 
     /// Deletes the target collection in the specifier
     pub fn delete_target(&self) -> Result<()> {
         match self.target.clone() {
             None => Err(Error::Invalid("target".to_string(), "not set".to_string())),
-            Some(s) => self.ss.delete_collection(&s),
+            Some(s) => self.store.delete_collection(&s),
         }
     }
 
-    fn get_unique_item(&self) -> Result<OwnedObjectPath> {
-        let paths = self.ss.find_matching_items(&self.search_attributes())?;
-        match paths.len() {
+    fn get_unique_item(&self) -> Result<u64> {
+        let ids = self.store.find_matching_items(&self.search_attributes())?;
+        match ids.len() {
             0 => Err(Error::NoEntry),
-            1 => Ok(paths[0].clone()),
+            1 => Ok(ids[0]),
             _ => {
-                let mut entries: Vec<Entry> = Vec::with_capacity(paths.len());
-                for path in paths {
+                let mut entries: Vec<Entry> = Vec::with_capacity(ids.len());
+                for id in ids {
                     entries.push(Entry::new_with_credential(Wrapper::new(
-                        self.ss.clone(),
-                        path,
+                        self.store.clone(),
+                        id,
                     )))
                 }
                 Err(Error::Ambiguous(entries))
@@ -119,26 +117,26 @@ impl CredentialApi for Specifier {
     fn set_secret(&self, secret: &[u8]) -> Result<()> {
         // first try to find a unique, existing, matching item and set its password
         match self.get_unique_item() {
-            Ok(p) => return self.ss.set_secret(&p, secret),
+            Ok(p) => return self.store.set_secret(p, secret),
             Err(Error::NoEntry) => {}
             Err(err) => return Err(err),
         }
         // if there is no existing item, create one for this credential.
         let collection = self.target.clone().unwrap_or("default".to_string());
-        self.ss
+        self.store
             .create_item(&collection, &self.label, self.search_attributes(), secret)
     }
 
     /// See the keyring-core API docs.
     fn get_secret(&self) -> Result<Vec<u8>> {
-        let path = self.get_unique_item()?;
-        self.ss.get_secret(&path)
+        let id = self.get_unique_item()?;
+        self.store.get_secret(id)
     }
 
     /// See the keyring-core API docs.
     fn get_attributes(&self) -> Result<HashMap<String, String>> {
-        let path = self.get_unique_item()?;
-        self.ss.get_attributes(&path)
+        let id = self.get_unique_item()?;
+        self.store.get_attributes(id)
     }
 
     /// See the keyring-core API docs.
@@ -151,20 +149,20 @@ impl CredentialApi for Specifier {
                 ));
             }
         }
-        let path = self.get_unique_item()?;
-        self.ss.update_attributes(&path, attributes)
+        let id = self.get_unique_item()?;
+        self.store.update_attributes(id, attributes)
     }
 
     /// See the keyring-core API docs.
     fn delete_credential(&self) -> Result<()> {
-        let path = self.get_unique_item()?;
-        self.ss.delete(&path)
+        let id = self.get_unique_item()?;
+        self.store.delete(id)
     }
 
     /// See the keyring-core API docs.
     fn get_credential(&self) -> Result<Option<Arc<Credential>>> {
-        let path = self.get_unique_item()?;
-        Ok(Some(Wrapper::new(self.ss.clone(), path)))
+        let id = self.get_unique_item()?;
+        Ok(Some(Wrapper::new(self.store.clone(), id)))
     }
 
     /// See the keyring-core API docs.
@@ -183,88 +181,74 @@ impl CredentialApi for Specifier {
     }
 }
 
-/// A wrapper around a secret-service item.
-///
-/// Items in the Secret Service are uniquely identified by their path,
-/// but the path is (per the spec) not supposed to be exposed to clients,
-/// so it's held privately. It is available to the debugger.
+/// A wrapper around a stored item, identified by its ID.
 pub struct Wrapper {
-    ss: Arc<Service<'static>>,
-    path: OwnedObjectPath,
+    store: Arc<Service>,
+    id: u64,
 }
 
 impl std::fmt::Debug for Wrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Wrapper").field("path", &self.path).finish()
+        f.debug_struct("Wrapper").field("id", &self.id).finish()
     }
 }
 
 impl Wrapper {
-    pub(crate) fn new(ss: Arc<Service<'static>>, path: OwnedObjectPath) -> Arc<Self> {
-        Arc::new(Self { ss, path })
+    pub(crate) fn new(store: Arc<Service>, id: u64) -> Arc<Self> {
+        Arc::new(Self { store, id })
     }
 
     /// Returns the label on the wrapped item.
     pub fn get_label(&self) -> Result<String> {
-        self.ss.ensure_unlocked(&self.path)?;
-        self.ss.get_label(&self.path)
+        self.store.get_label(self.id)
     }
 
     /// Sets the label on the wrapped item.
     pub fn set_label(&self, label: &str) -> Result<()> {
-        self.ss.ensure_unlocked(&self.path)?;
-        self.ss.set_label(&self.path, label)
+        self.store.set_label(self.id, label)
     }
 
-    /// Gets the path of the wrapped item.
-    pub fn get_path(&self) -> String {
-        self.path.to_string()
+    /// Gets the ID of the wrapped item.
+    pub fn get_id(&self) -> u64 {
+        self.id
     }
 }
 
 impl CredentialApi for Wrapper {
     /// See the keyring-core API docs.
     fn set_secret(&self, secret: &[u8]) -> Result<()> {
-        self.ss.ensure_unlocked(&self.path)?;
-        self.ss.set_secret(&self.path, secret)
+        self.store.set_secret(self.id, secret)
     }
 
     /// See the keyring-core API docs.
     fn get_secret(&self) -> Result<Vec<u8>> {
-        self.ss.ensure_unlocked(&self.path)?;
-        self.ss.get_secret(&self.path)
+        self.store.get_secret(self.id)
     }
 
     /// See the keyring-core API docs.
     fn get_attributes(&self) -> Result<HashMap<String, String>> {
-        self.ss.ensure_unlocked(&self.path)?;
-        self.ss.get_attributes(&self.path)
+        self.store.get_attributes(self.id)
     }
 
     /// See the keyring-core API docs.
     fn update_attributes(&self, attributes: &HashMap<&str, &str>) -> Result<()> {
-        self.ss.ensure_unlocked(&self.path)?;
-        self.ss.update_attributes(&self.path, attributes)
+        self.store.update_attributes(self.id, attributes)
     }
 
     /// See the keyring-core API docs.
     fn delete_credential(&self) -> Result<()> {
-        self.ss.ensure_unlocked(&self.path)?;
-        self.ss.delete(&self.path)
+        self.store.delete(self.id)
     }
 
     /// See the keyring-core API docs.
     fn get_credential(&self) -> Result<Option<Arc<Credential>>> {
-        self.ss.ensure_unlocked(&self.path)?;
+        self.store.ensure_exists(self.id)?;
         Ok(None)
     }
 
     /// See the keyring-core API docs.
     fn get_specifiers(&self) -> Option<(String, String)> {
-        if self.ss.ensure_unlocked(&self.path).is_err() {
-            return None;
-        }
-        let attributes = self.ss.get_attributes(&self.path).unwrap_or_default();
+        let attributes = self.store.get_attributes(self.id).ok()?;
         if let Some(service) = attributes.get("service")
             && let Some(user) = attributes.get("username")
         {

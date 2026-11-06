@@ -1,38 +1,8 @@
-//!
-//! Error utilities
-//!
-
-use secret_service::Error as ServiceError;
+//! Error utilities.
 
 use keyring_core::error::Error;
 
-/// Map underlying secret-service errors to keyring errors with
-/// appropriate annotation.
-pub fn decode_error(err: ServiceError) -> Error {
-    match err {
-        ServiceError::Locked => no_access(err),
-        ServiceError::NoResult => no_access(err),
-        ServiceError::Prompt => no_access(err),
-        _ => platform_failure(err),
-    }
-}
-
-/// Create the error for an empty `target` modifier.
-pub fn empty_target() -> Error {
-    Error::Invalid("target".to_string(), "cannot be empty".to_string())
-}
-
-/// Wrap an underlying backend error as a platform failure.
+/// Wrap an underlying error as a platform failure.
 pub fn platform_failure(err: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::PlatformFailure(wrap(err))
-}
-
-fn no_access(err: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::NoStorageAccess(wrap(err))
-}
-
-fn wrap(
-    err: impl std::error::Error + Send + Sync + 'static,
-) -> Box<dyn std::error::Error + Send + Sync> {
-    Box::new(err)
+    Error::PlatformFailure(Box::new(err))
 }

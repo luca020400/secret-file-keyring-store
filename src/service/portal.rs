@@ -16,8 +16,6 @@ use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
 use sha2::Sha256;
 
-use zbus::zvariant::OwnedObjectPath;
-
 use serde::{Deserialize, Serialize};
 
 use crate::errors::platform_failure;
@@ -59,32 +57,26 @@ impl PortalService {
             Some(envelope) => {
                 let records = store.decrypt(&envelope)?;
                 if envelope.token != token {
-                    store.save(&records, token.as_deref())?;
+                    store.save(&records, token.as_deref(), envelope.next_id)?;
                 }
             }
-            None => store.save(&[], token.as_deref())?,
+            None => store.save(&[], token.as_deref(), 0)?,
         }
 
         Ok(store)
     }
 
-    pub(super) fn find_matching_items(
-        &self,
-        attributes: &HashMap<&str, &str>,
-    ) -> Result<Vec<OwnedObjectPath>> {
+    pub(super) fn find_matching_items(&self, attributes: &HashMap<&str, &str>) -> Result<Vec<u64>> {
         let (_, records) = self.load()?;
-        records
+        Ok(records
             .iter()
             .filter(|r| {
                 attributes
                     .iter()
                     .all(|(k, v)| r.attributes.get(*k).is_some_and(|value| value == v))
             })
-            .map(|r| {
-                OwnedObjectPath::try_from(r.path.clone())
-                    .map_err(|err| Error::BadStoreFormat(err.to_string()))
-            })
-            .collect()
+            .map(|r| r.id)
+            .collect())
     }
 
     pub(super) fn create_item(
@@ -94,10 +86,14 @@ impl PortalService {
         attributes: HashMap<&str, &str>,
         secret: &[u8],
     ) -> Result<()> {
-        let (envelope, mut records) = self.load()?;
+        let (mut envelope, mut records) = self.load()?;
+        let id = envelope.next_id;
+        envelope.next_id = id
+            .checked_add(1)
+            .ok_or_else(|| Error::BadStoreFormat("Record IDs exhausted".into()))?;
         records.push(Record {
             secret: secret.to_vec(),
-            path: format!("/portal/item_{:032x}", u128::from_ne_bytes(random()?)),
+            id,
             label: label.to_string(),
             collection: collection.to_string(),
             attributes: attributes
@@ -105,7 +101,7 @@ impl PortalService {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         });
-        self.save(&records, envelope.token.as_deref())
+        self.save(&records, envelope.token.as_deref(), envelope.next_id)
     }
 
     pub(super) fn delete_collection(&self, collection: &str) -> Result<()> {
@@ -119,72 +115,72 @@ impl PortalService {
             return Err(Error::NoEntry);
         }
         records.retain(|r| r.collection != collection);
-        self.save(&records, envelope.token.as_deref())
+        self.save(&records, envelope.token.as_deref(), envelope.next_id)
     }
 
-    /// Given an item's path, ensure it exists and is unlocked
-    pub(super) fn ensure_unlocked(&self, path: &OwnedObjectPath) -> Result<()> {
+    /// Given an item's ID, ensure it exists
+    pub(super) fn ensure_exists(&self, id: u64) -> Result<()> {
         let (_, records) = self.load()?;
-        position(&records, path).map(|_| ())
+        position(&records, id).map(|_| ())
     }
 
-    /// Given an item's path, set its secret.
-    pub(super) fn set_secret(&self, path: &OwnedObjectPath, secret: &[u8]) -> Result<()> {
+    /// Given an item's ID, set its secret.
+    pub(super) fn set_secret(&self, id: u64, secret: &[u8]) -> Result<()> {
         let (envelope, mut records) = self.load()?;
-        let index = position(&records, path)?;
+        let index = position(&records, id)?;
         records[index].secret = secret.to_vec();
-        self.save(&records, envelope.token.as_deref())
+        self.save(&records, envelope.token.as_deref(), envelope.next_id)
     }
 
-    /// Given an existing item's path, retrieve its secret.
-    pub(super) fn get_secret(&self, path: &OwnedObjectPath) -> Result<Vec<u8>> {
+    /// Given an existing item's ID, retrieve its secret.
+    pub(super) fn get_secret(&self, id: u64) -> Result<Vec<u8>> {
         let (_, records) = self.load()?;
-        let item = &records[position(&records, path)?];
+        let item = &records[position(&records, id)?];
         Ok(item.secret.clone())
     }
 
-    /// Given an existing item's path, retrieve its attributes.
-    pub(super) fn get_attributes(&self, path: &OwnedObjectPath) -> Result<HashMap<String, String>> {
+    /// Given an existing item's ID, retrieve its attributes.
+    pub(super) fn get_attributes(&self, id: u64) -> Result<HashMap<String, String>> {
         let (_, records) = self.load()?;
-        let item = &records[position(&records, path)?];
+        let item = &records[position(&records, id)?];
         Ok(item.attributes.clone())
     }
 
-    /// Given an existing item's path, update its attributes.
+    /// Given an existing item's ID, update its attributes.
     pub(super) fn update_attributes(
         &self,
-        path: &OwnedObjectPath,
+        id: u64,
         attributes: &HashMap<&str, &str>,
     ) -> Result<()> {
         let (envelope, mut records) = self.load()?;
-        let index = position(&records, path)?;
+        let index = position(&records, id)?;
         let item = &mut records[index];
         for (k, v) in attributes {
             item.attributes.insert(k.to_string(), v.to_string());
         }
-        self.save(&records, envelope.token.as_deref())
+        self.save(&records, envelope.token.as_deref(), envelope.next_id)
     }
 
-    // Given an existing item's path, delete it.
-    pub(super) fn delete(&self, path: &OwnedObjectPath) -> Result<()> {
+    // Given an existing item's ID, delete it.
+    pub(super) fn delete(&self, id: u64) -> Result<()> {
         let (envelope, mut records) = self.load()?;
-        records.remove(position(&records, path)?);
-        self.save(&records, envelope.token.as_deref())
+        records.remove(position(&records, id)?);
+        self.save(&records, envelope.token.as_deref(), envelope.next_id)
     }
 
-    // Given an existing item's path, return its label.
-    pub(super) fn get_label(&self, path: &OwnedObjectPath) -> Result<String> {
+    // Given an existing item's ID, return its label.
+    pub(super) fn get_label(&self, id: u64) -> Result<String> {
         let (_, records) = self.load()?;
-        let item = &records[position(&records, path)?];
+        let item = &records[position(&records, id)?];
         Ok(item.label.clone())
     }
 
-    // Given an existing item's path, set its label.
-    pub(super) fn set_label(&self, path: &OwnedObjectPath, label: &str) -> Result<()> {
+    // Given an existing item's ID, set its label.
+    pub(super) fn set_label(&self, id: u64, label: &str) -> Result<()> {
         let (envelope, mut records) = self.load()?;
-        let index = position(&records, path)?;
+        let index = position(&records, id)?;
         records[index].label = label.to_string();
-        self.save(&records, envelope.token.as_deref())
+        self.save(&records, envelope.token.as_deref(), envelope.next_id)
     }
 
     fn cipher(&self) -> XChaCha20Poly1305 {
@@ -202,7 +198,7 @@ impl PortalService {
                 &XNonce::from(envelope.nonce),
                 Payload {
                     msg: &envelope.ciphertext,
-                    aad: &aad(&envelope.salt, envelope.token.as_deref()),
+                    aad: &aad(&envelope.salt, envelope.token.as_deref(), envelope.next_id),
                 },
             )
             .map_err(|_| Error::BadStoreFormat("Wrong secret or corrupted store".into()))?;
@@ -210,9 +206,9 @@ impl PortalService {
         serde_json::from_slice(&plaintext).map_err(|err| Error::BadStoreFormat(err.to_string()))
     }
 
-    fn save(&self, records: &[Record], token: Option<&str>) -> Result<()> {
+    fn save(&self, records: &[Record], token: Option<&str>, next_id: u64) -> Result<()> {
         let nonce = random::<NONCE_LEN>()?;
-        let aad = aad(&self.salt, token);
+        let aad = aad(&self.salt, token, next_id);
 
         // Serialize records to JSON and encrypt.
         let plaintext = serde_json::to_vec(records).map_err(platform_failure)?;
@@ -229,6 +225,7 @@ impl PortalService {
 
         let envelope = Envelope {
             version: VERSION,
+            next_id,
             salt: self.salt,
             nonce,
             token: token.map(str::to_owned),
@@ -271,10 +268,10 @@ fn read_envelope(keyring_file: &Path) -> Result<Option<Envelope>> {
     Ok(Some(envelope))
 }
 
-fn position(records: &[Record], path: &OwnedObjectPath) -> Result<usize> {
+fn position(records: &[Record], id: u64) -> Result<usize> {
     records
         .iter()
-        .position(|r| r.path == path.as_str())
+        .position(|r| r.id == id)
         .ok_or(Error::NoEntry)
 }
 
@@ -293,7 +290,7 @@ const NONCE_LEN: usize = 24;
 const VERSION: u32 = 1;
 fn derive(secret: &[u8], salt: &[u8; SALT_LEN]) -> [u8; KEY_LEN] {
     let mut key = [0; KEY_LEN];
-    let info = format!("portal-secret-service-keyring-store/{VERSION}/encryption-key");
+    let info = format!("zbus-secret-portal-keyring-store/{VERSION}/encryption-key");
     Hkdf::<Sha256>::new(Some(salt), secret)
         .expand(info.as_bytes(), &mut key)
         .expect("32 bytes is a valid HKDF-SHA256 output length");
@@ -304,16 +301,18 @@ fn derive(secret: &[u8], salt: &[u8; SALT_LEN]) -> [u8; KEY_LEN] {
 #[serde(deny_unknown_fields)]
 struct Envelope {
     version: u32,
+    next_id: u64,
     salt: [u8; SALT_LEN],
     nonce: [u8; NONCE_LEN],
     token: Option<String>,
     ciphertext: Vec<u8>,
 }
 
-fn aad(salt: &[u8; SALT_LEN], token: Option<&str>) -> Vec<u8> {
+fn aad(salt: &[u8; SALT_LEN], token: Option<&str>, next_id: u64) -> Vec<u8> {
     let token_bytes = token.unwrap_or("").as_bytes();
-    let mut aad = Vec::with_capacity(4 + SALT_LEN + 1 + token_bytes.len());
+    let mut aad = Vec::with_capacity(4 + 8 + SALT_LEN + 1 + token_bytes.len());
     aad.extend_from_slice(&VERSION.to_le_bytes());
+    aad.extend_from_slice(&next_id.to_le_bytes());
     aad.extend_from_slice(salt);
     aad.push(token.is_some() as u8);
     aad.extend_from_slice(token_bytes);
@@ -323,7 +322,7 @@ fn aad(salt: &[u8; SALT_LEN], token: Option<&str>) -> Vec<u8> {
 #[derive(Serialize, Deserialize)]
 struct Record {
     secret: Vec<u8>,
-    path: String,
+    id: u64,
     label: String,
     collection: String,
     attributes: HashMap<String, String>,

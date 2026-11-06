@@ -1,20 +1,25 @@
-# zbus Secret Service keyring store
+# Secret portal keyring store
 
-[![build](https://github.com/open-source-cooperative/zbus-secret-service-keyring-store/actions/workflows/ci.yaml/badge.svg)](https://github.com/open-source-cooperative/zbus-secret-service-keyring-store/actions) [![crates.io](https://img.shields.io/crates/v/zbus-secret-service-keyring-store.svg?style=flat-square)](https://crates.io/crates/zbus-secret-service-keyring-store) [![docs.rs](https://docs.rs/zbus-secret-service-keyring-store/badge.svg)](https://docs.rs/zbus-secret-service-keyring-store) [![codecov](https://codecov.io/gh/open-source-cooperative/zbus-secret-service-keyring-store/graph/badge.svg)](https://codecov.io/gh/open-source-cooperative/zbus-secret-service-keyring-store)
+[![build](https://github.com/open-source-cooperative/zbus-secret-portal-keyring-store/actions/workflows/ci.yaml/badge.svg)](https://github.com/open-source-cooperative/zbus-secret-portal-keyring-store/actions) [![crates.io](https://img.shields.io/crates/v/zbus-secret-portal-keyring-store.svg?style=flat-square)](https://crates.io/crates/zbus-secret-portal-keyring-store) [![docs.rs](https://docs.rs/zbus-secret-portal-keyring-store/badge.svg)](https://docs.rs/zbus-secret-portal-keyring-store) [![codecov](https://codecov.io/gh/open-source-cooperative/zbus-secret-portal-keyring-store/graph/badge.svg)](https://codecov.io/gh/open-source-cooperative/zbus-secret-portal-keyring-store)
 
-This library provides a credential store for use with the [keyring ecosystem](https://github.com/open-source-cooperative/keyring-rs/wiki/Keyring) that uses the [Secret Service](https://specifications.freedesktop.org/secret-service/latest/description.html) for credential storage.
+This library stores credentials in an encrypted JSON file for the keyring ecosystem.
+It retrieves the application's secret through the [Secret portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Secret.html).
 
 ## Usage
 
-To use this credential store provider, you must take a dependency on the [keyring-core crate](https://crates.io/crates/keyring-core) and on [this crate](https://crates.io/crates/zbus-secret-service-keyring-store). Then you instantiate and use a credential store as shown in the [example program](https://github.com/open-source-cooperative/zbus-secret-service-keyring-store/blob/main/examples/example.rs) in this crate. See the [docs for this crate](https://docs.rs/docs/zbus-secret-service-keyring-store) for more detail.
+```rust
+use std::collections::HashMap;
+use zbus_secret_portal_keyring_store::Store;
 
-## Features
-
-The features of this crate mirror those of the [secret-service crate](https://crates.io/crates/secret-service).  If your application does not use an asynchronous runtime, then you should only enable one of the two features which specify the cryptographic backend the Secret Service will use (`crypto-rust` or `crypto-openssl`). If your application uses an asynchronous runtime, you should instead enable one of the four features that specify both which runtime you are using and which cryptographic backend to use (`rt-tokio-crypto-rust`, `rt-tokio-crypto-openssl`, `rt-async-std-crypto-rust`, or `rt-async-std-crypto-openssl`).
+let store = Store::new_with_configuration(&HashMap::from([
+    ("keyring-file", "/path/to/application/keyring.json"),
+]))?;
+keyring_core::set_default_store(store);
+```
 
 # Changelog
 
-See the [release history on GitHub](https://github.com/open-source-cooperative/zbus-secret-service-keyring-store/releases) for full details.
+See the [release history on GitHub](https://github.com/open-source-cooperative/zbus-secret-portal-keyring-store/releases) for full details.
 
 ## License
 

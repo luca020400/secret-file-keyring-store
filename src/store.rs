@@ -10,11 +10,11 @@ use keyring_core::{Entry, Error, Result};
 use crate::cred::{Specifier, Wrapper};
 use crate::service::Service;
 
-/// Secret service credential store
+/// Secret portal file credential store
 pub struct Store {
     /// The unique ID for this store instance.
     pub id: String,
-    pub(crate) ss: Arc<Service<'static>>,
+    pub(crate) service: Arc<Service>,
 }
 
 impl std::fmt::Debug for Store {
@@ -27,18 +27,10 @@ impl std::fmt::Debug for Store {
 }
 
 impl Store {
-    /// Always fails: use [`Self::new_with_configuration`] to provide a file path.
-    pub fn new() -> Result<Arc<Self>> {
-        Err(Error::NotSupportedByStore(
-            "A file path is required; use new_with_configuration".to_string(),
-        ))
-    }
-
     /// Create a store with the specified configuration.
     ///
     /// The required `keyring-file` key names the portal backend's encrypted JSON file.
     /// The file is created if needed; its parent directory must already exist.
-    /// Secret Service is tried first and does not use this path.
     /// No other configuration keys are supported.
     pub fn new_with_configuration(config: &HashMap<&str, &str>) -> Result<Arc<Self>> {
         if config.keys().any(|key| *key != "keyring-file") {
@@ -71,15 +63,14 @@ impl Store {
             env!("CARGO_PKG_VERSION"),
             elapsed.as_secs_f64()
         );
-        let ss = Arc::new(Service::new(keyring_file)?);
-        Ok(Arc::new(Store { id, ss }))
+        let service = Arc::new(Service::new(keyring_file)?);
+        Ok(Arc::new(Store { id, service }))
     }
 }
 
 impl CredentialStoreApi for Store {
     fn vendor(&self) -> String {
-        "Secret Service store, https://crates.io/crates/zbus-secret-service-keyring-store"
-            .to_string()
+        "Secret portal store, https://crates.io/crates/zbus-secret-portal-keyring-store".to_string()
     }
 
     fn id(&self) -> String {
@@ -109,7 +100,7 @@ impl CredentialStoreApi for Store {
             ));
         }
         Ok(Entry::new_with_credential(Specifier::new(
-            self.ss.clone(),
+            self.service.clone(),
             label,
             target,
             service,
@@ -120,16 +111,14 @@ impl CredentialStoreApi for Store {
     /// See the keyring-core API docs.
     ///
     /// All the key-value pairs are interpreted as attribute/value pairs to
-    /// search for (case-sensitive) in the underlying secret service
-    /// If the search matches locked items, the search will prompt the user
-    /// to unlock them before returning.
+    /// search for (case-sensitive) in the encrypted keyring file.
     fn search(&self, spec: &HashMap<&str, &str>) -> Result<Vec<Entry>> {
-        let paths = self.ss.find_matching_items(spec)?;
-        let mut results = Vec::with_capacity(paths.len());
-        for path in paths {
+        let ids = self.service.find_matching_items(spec)?;
+        let mut results = Vec::with_capacity(ids.len());
+        for id in ids {
             results.push(Entry::new_with_credential(Wrapper::new(
-                self.ss.clone(),
-                path.clone(),
+                self.service.clone(),
+                id,
             )));
         }
         Ok(results)

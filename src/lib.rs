@@ -1,24 +1,22 @@
 /*!
-# Secret portal credential store for keyring
+# Secret credential store for keyring
 
-This crate stores credentials in an encrypted JSON file, using an application
-secret retrieved from the desktop Secret portal. Opening a store may prompt
-the user for access.
+This crate stores credentials in an encrypted JSON file using an application
+provided secret.
 
 ## Configuration
 
-Use [`Store::new_with_configuration`] with the required `keyring-file` key:
+Use [`Store::new`] with the keyring file path and secret:
 
 ```no_run
-use std::collections::HashMap;
-use zbus_secret_portal_keyring_store::Store;
+use secret_file_keyring_store::Store;
 
-let store = Store::new_with_configuration(&HashMap::from([
-    ("keyring-file", "/path/to/application/keyring.json"),
-]))?;
+# let application_secret = [0u8; 32];
+let store = Store::new("/path/to/application/keyring.json", &application_secret)?;
 keyring_core::set_default_store(store);
 # Ok::<(), keyring_core::Error>(())
 ```
+
 ## Credentials and attributes
 
 Credentials are found by their `service` and `username` attributes. A `target`
@@ -34,11 +32,11 @@ and [`cred::Wrapper`]. Each stored item has a stable ID exposed by
 Specifier updates cannot change `service`, `username`, or `target`.
 */
 
-/// Credentials for Secret portal file store.
+/// Credentials for Secret file store.
 pub mod cred;
 pub mod errors;
 mod service;
-/// The credential store backed by the Secret portal.
+/// The credential store backed by an encrypted file.
 pub mod store;
 pub use store::Store;
 #[cfg(test)]

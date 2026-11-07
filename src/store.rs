@@ -10,7 +10,7 @@ use keyring_core::{Entry, Error, Result};
 use crate::cred::{Specifier, Wrapper};
 use crate::service::Service;
 
-/// Secret portal file credential store
+/// Secret file credential store
 pub struct Store {
     /// The unique ID for this store instance.
     pub id: String,
@@ -27,32 +27,25 @@ impl std::fmt::Debug for Store {
 }
 
 impl Store {
-    /// Create a store with the specified configuration.
+    /// Open or create an encrypted store using an application-provided secret.
     ///
-    /// The required `keyring-file` key names the portal backend's encrypted JSON file.
-    /// The file and a sibling `<keyring-file>.lock` file are created if needed;
-    /// their parent directory must already exist.
-    /// No other configuration keys are supported.
-    pub fn new_with_configuration(config: &HashMap<&str, &str>) -> Result<Arc<Self>> {
-        if config.keys().any(|key| *key != "keyring-file") {
-            return Err(Error::NotSupportedByStore(
-                "Unknown store configuration".to_string(),
+    /// The file and a sibling `<keyring_file>.lock` file are created if needed.
+    pub fn new(keyring_file: impl AsRef<Path>, secret: &[u8]) -> Result<Arc<Self>> {
+        let keyring_file = keyring_file.as_ref();
+        if keyring_file.as_os_str().is_empty() {
+            return Err(Error::Invalid(
+                "keyring-file".to_string(),
+                "cannot be empty".to_string(),
             ));
         }
-        let keyring_file = config
-            .get("keyring-file")
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                Error::Invalid(
-                    "keyring-file".to_string(),
-                    "must be provided and cannot be empty".to_string(),
-                )
-            })?;
 
-        Store::new_internal(Path::new(keyring_file))
-    }
+        if secret.is_empty() {
+            return Err(Error::Invalid(
+                "secret".to_string(),
+                "cannot be empty".to_string(),
+            ));
+        }
 
-    fn new_internal(keyring_file: &Path) -> Result<Arc<Self>> {
         let now = SystemTime::now();
         let elapsed = if now.lt(&UNIX_EPOCH) {
             UNIX_EPOCH.duration_since(now).unwrap()
@@ -64,14 +57,14 @@ impl Store {
             env!("CARGO_PKG_VERSION"),
             elapsed.as_secs_f64()
         );
-        let service = Arc::new(Service::new(keyring_file)?);
+        let service = Arc::new(Service::new(keyring_file, secret)?);
         Ok(Arc::new(Store { id, service }))
     }
 }
 
 impl CredentialStoreApi for Store {
     fn vendor(&self) -> String {
-        "Secret portal store, https://crates.io/crates/zbus-secret-portal-keyring-store".to_string()
+        "Secret store, https://crates.io/crates/secret-file-keyring-store".to_string()
     }
 
     fn id(&self) -> String {

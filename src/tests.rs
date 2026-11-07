@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Once};
+use std::sync::{Arc, Once, OnceLock};
 
 use super::{Store, cred::Specifier};
 use crate::cred::Wrapper;
@@ -8,27 +8,13 @@ use keyring_core::{CredentialStore, Entry, Error, api::CredentialPersistence, ge
 static SET_STORE: Once = Once::new();
 
 fn configured_store() -> Arc<Store> {
-    let keyring_file = std::env::temp_dir().join("keyring-store-tests.json");
-    Arc::new(Store {
-        id: generate_random_string(),
-        service: Arc::new(crate::service::Service::new(&keyring_file).unwrap()),
-    })
-}
-
-#[test]
-fn test_required_keyring_file_configuration() {
-    for config in [HashMap::new(), HashMap::from([("keyring-file", "")])] {
-        assert!(
-            matches!(Store::new_with_configuration(&config), Err(Error::Invalid(key, _)) if key == "keyring-file")
-        );
-    }
-    assert!(matches!(
-        Store::new_with_configuration(&HashMap::from([
-            ("keyring-file", "/tmp/store"),
-            ("unknown", "value")
-        ])),
-        Err(Error::NotSupportedByStore(_))
-    ));
+    static DIRECTORY: OnceLock<tempfile::TempDir> = OnceLock::new();
+    let directory = DIRECTORY.get_or_init(|| tempfile::tempdir().unwrap());
+    Store::new(
+        directory.path().join("keyring.json"),
+        b"test application secret",
+    )
+    .unwrap()
 }
 
 fn usually_goes_in_main() {
@@ -140,8 +126,6 @@ fn test_invalid_parameter() {
     let modifiers = HashMap::from([("label", "")]);
     let entry = Entry::new_with_modifiers("service", "user", &modifiers);
     assert!(matches!(entry, Err(Error::Invalid(_, _))));
-    let store = Store::new_with_configuration(&HashMap::from([("anything", "anything")]));
-    assert!(matches!(store, Err(Error::NotSupportedByStore(_))));
 }
 
 #[test]

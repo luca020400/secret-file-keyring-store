@@ -1,25 +1,21 @@
-# Secret portal keyring store
+# Secret file keyring store
 
-[![build](https://github.com/open-source-cooperative/zbus-secret-portal-keyring-store/actions/workflows/ci.yaml/badge.svg)](https://github.com/open-source-cooperative/zbus-secret-portal-keyring-store/actions) [![crates.io](https://img.shields.io/crates/v/zbus-secret-portal-keyring-store.svg?style=flat-square)](https://crates.io/crates/zbus-secret-portal-keyring-store) [![docs.rs](https://docs.rs/zbus-secret-portal-keyring-store/badge.svg)](https://docs.rs/zbus-secret-portal-keyring-store) [![codecov](https://codecov.io/gh/open-source-cooperative/zbus-secret-portal-keyring-store/graph/badge.svg)](https://codecov.io/gh/open-source-cooperative/zbus-secret-portal-keyring-store)
+[![build](https://github.com/open-source-cooperative/secret-file-keyring-store/actions/workflows/ci.yaml/badge.svg)](https://github.com/open-source-cooperative/secret-file-keyring-store/actions) [![crates.io](https://img.shields.io/crates/v/secret-file-keyring-store.svg?style=flat-square)](https://crates.io/crates/secret-file-keyring-store) [![docs.rs](https://docs.rs/secret-file-keyring-store/badge.svg)](https://docs.rs/secret-file-keyring-store) [![codecov](https://codecov.io/gh/open-source-cooperative/secret-file-keyring-store/graph/badge.svg)](https://codecov.io/gh/open-source-cooperative/secret-file-keyring-store)
 
 This library stores credentials in an encrypted JSON file for the keyring ecosystem.
-It retrieves the application's secret through the [Secret portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Secret.html).
 
 ## Usage
 
 ```rust
-use std::collections::HashMap;
-use zbus_secret_portal_keyring_store::Store;
+use secret_file_keyring_store::Store;
 
-let store = Store::new_with_configuration(&HashMap::from([
-    ("keyring-file", "/path/to/application/keyring.json"),
-]))?;
+let store = Store::new("/path/to/application/keyring.json", &application_secret)?;
 keyring_core::set_default_store(store);
 ```
 
 # Changelog
 
-See the [release history on GitHub](https://github.com/open-source-cooperative/zbus-secret-portal-keyring-store/releases) for full details.
+See the [release history on GitHub](https://github.com/open-source-cooperative/secret-file-keyring-store/releases) for full details.
 
 ## License
 

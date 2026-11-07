@@ -3,14 +3,12 @@
 use std::collections::HashMap;
 
 use keyring_core::{Entry, Error};
-use zbus_secret_portal_keyring_store::{Store, cred::Specifier};
+use secret_file_keyring_store::{Store, cred::Specifier};
 
 fn main() {
-    // Set the secret portal store as the default store
-    keyring_core::set_default_store(
-        Store::new_with_configuration(&HashMap::from([("keyring-file", "./keyring-store.json")]))
-            .unwrap(),
-    );
+    // Supply the same application secret on each run.
+    let secret = std::env::var("KEYRING_STORE_SECRET").expect("set KEYRING_STORE_SECRET");
+    keyring_core::set_default_store(Store::new("./keyring-store.json", secret.as_bytes()).unwrap());
 
     let service = "service-name";
     let user = "user-name";

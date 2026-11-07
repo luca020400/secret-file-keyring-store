@@ -1,6 +1,4 @@
-//! Portal-backed encrypted file service.
-
-mod secret;
+//! Encrypted file service.
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -23,19 +21,16 @@ use serde::{Deserialize, Serialize};
 use crate::errors::platform_failure;
 use keyring_core::error::{Error, Result};
 
-/// An encrypted credential store unlocked through the desktop Secret portal.
-pub(super) struct PortalService {
+/// An encrypted credential store unlocked through a secret.
+pub(super) struct FileService {
     keyring_file: PathBuf,
     lock_file: PathBuf,
     key: [u8; KEY_LEN],
     salt: [u8; SALT_LEN],
 }
 
-impl PortalService {
-    /// Opens or creates the store at `keyring_file`, requesting its key from the portal.
-    ///
-    /// This blocks while the portal responds and may prompt the user for access.
-    pub(super) fn new(keyring_file: &Path) -> Result<Self> {
+impl FileService {
+    pub(super) fn new(keyring_file: &Path, secret: &[u8]) -> Result<Self> {
         let mut lock_file = keyring_file.as_os_str().to_os_string();
         lock_file.push(".lock");
         let lock_file = PathBuf::from(lock_file);
@@ -43,10 +38,6 @@ impl PortalService {
 
         let keyring_file = keyring_file.to_path_buf();
         let existing = read_envelope(&keyring_file)?;
-        let previous_token = existing.as_ref().and_then(|e| e.token.as_deref());
-
-        let (secret, token) = secret::retrieve(previous_token)?;
-        let token = token.or_else(|| previous_token.map(str::to_owned));
 
         // Get pre-existing salt or generate a new one.
         let salt = match &existing {
@@ -57,19 +48,15 @@ impl PortalService {
         let store = Self {
             keyring_file,
             lock_file,
-            key: derive(&secret, &salt),
+            key: derive(secret, &salt),
             salt,
         };
 
-        // Update the store if the token has changed.
         match existing {
             Some(envelope) => {
-                let records = store.decrypt(&envelope)?;
-                if envelope.token != token {
-                    store.save(&records, token.as_deref(), envelope.next_id)?;
-                }
+                store.decrypt(&envelope)?;
             }
-            None => store.save(&[], token.as_deref(), 0)?,
+            None => store.save(&[], 0)?,
         }
 
         Ok(store)
@@ -112,7 +99,7 @@ impl PortalService {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         });
-        self.save(&records, envelope.token.as_deref(), envelope.next_id)
+        self.save(&records, envelope.next_id)
     }
 
     pub(super) fn delete_collection(&self, collection: &str) -> Result<()> {
@@ -127,7 +114,7 @@ impl PortalService {
             return Err(Error::NoEntry);
         }
         records.retain(|r| r.collection != collection);
-        self.save(&records, envelope.token.as_deref(), envelope.next_id)
+        self.save(&records, envelope.next_id)
     }
 
     /// Given an item's ID, ensure it exists
@@ -143,7 +130,7 @@ impl PortalService {
         let (envelope, mut records) = self.load()?;
         let index = position(&records, id)?;
         records[index].secret = secret.to_vec();
-        self.save(&records, envelope.token.as_deref(), envelope.next_id)
+        self.save(&records, envelope.next_id)
     }
 
     /// Given an existing item's ID, retrieve its secret.
@@ -175,7 +162,7 @@ impl PortalService {
         for (k, v) in attributes {
             item.attributes.insert(k.to_string(), v.to_string());
         }
-        self.save(&records, envelope.token.as_deref(), envelope.next_id)
+        self.save(&records, envelope.next_id)
     }
 
     // Given an existing item's ID, delete it.
@@ -183,7 +170,7 @@ impl PortalService {
         let _lock = lock(&self.lock_file, FlockOperation::LockExclusive)?;
         let (envelope, mut records) = self.load()?;
         records.remove(position(&records, id)?);
-        self.save(&records, envelope.token.as_deref(), envelope.next_id)
+        self.save(&records, envelope.next_id)
     }
 
     // Given an existing item's ID, return its label.
@@ -200,7 +187,7 @@ impl PortalService {
         let (envelope, mut records) = self.load()?;
         let index = position(&records, id)?;
         records[index].label = label.to_string();
-        self.save(&records, envelope.token.as_deref(), envelope.next_id)
+        self.save(&records, envelope.next_id)
     }
 
     fn cipher(&self) -> XChaCha20Poly1305 {
@@ -218,7 +205,7 @@ impl PortalService {
                 &XNonce::from(envelope.nonce),
                 Payload {
                     msg: &envelope.ciphertext,
-                    aad: &aad(&envelope.salt, envelope.token.as_deref(), envelope.next_id),
+                    aad: &aad(&envelope.salt, envelope.next_id),
                 },
             )
             .map_err(|_| Error::BadStoreFormat("Wrong secret or corrupted store".into()))?;
@@ -226,9 +213,9 @@ impl PortalService {
         serde_json::from_slice(&plaintext).map_err(|err| Error::BadStoreFormat(err.to_string()))
     }
 
-    fn save(&self, records: &[Record], token: Option<&str>, next_id: u64) -> Result<()> {
+    fn save(&self, records: &[Record], next_id: u64) -> Result<()> {
         let nonce = random::<NONCE_LEN>()?;
-        let aad = aad(&self.salt, token, next_id);
+        let aad = aad(&self.salt, next_id);
 
         // Serialize records to JSON and encrypt.
         let plaintext = serde_json::to_vec(records).map_err(platform_failure)?;
@@ -248,7 +235,6 @@ impl PortalService {
             next_id,
             salt: self.salt,
             nonce,
-            token: token.map(str::to_owned),
             ciphertext,
         };
 
@@ -324,7 +310,7 @@ const NONCE_LEN: usize = 24;
 const VERSION: u32 = 1;
 fn derive(secret: &[u8], salt: &[u8; SALT_LEN]) -> [u8; KEY_LEN] {
     let mut key = [0; KEY_LEN];
-    let info = format!("zbus-secret-portal-keyring-store/{VERSION}/encryption-key");
+    let info = format!("secret-file-keyring-store/{VERSION}/encryption-key");
     Hkdf::<Sha256>::new(Some(salt), secret)
         .expand(info.as_bytes(), &mut key)
         .expect("32 bytes is a valid HKDF-SHA256 output length");
@@ -338,18 +324,14 @@ struct Envelope {
     next_id: u64,
     salt: [u8; SALT_LEN],
     nonce: [u8; NONCE_LEN],
-    token: Option<String>,
     ciphertext: Vec<u8>,
 }
 
-fn aad(salt: &[u8; SALT_LEN], token: Option<&str>, next_id: u64) -> Vec<u8> {
-    let token_bytes = token.unwrap_or("").as_bytes();
-    let mut aad = Vec::with_capacity(4 + 8 + SALT_LEN + 1 + token_bytes.len());
+fn aad(salt: &[u8; SALT_LEN], next_id: u64) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(4 + 8 + SALT_LEN);
     aad.extend_from_slice(&VERSION.to_le_bytes());
     aad.extend_from_slice(&next_id.to_le_bytes());
     aad.extend_from_slice(salt);
-    aad.push(token.is_some() as u8);
-    aad.extend_from_slice(token_bytes);
     aad
 }
 

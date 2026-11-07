@@ -1,14 +1,14 @@
 [package]
 authors = ["Luca Stefani <luca.stefani.ge1@gmail.com>", "Daniel Brotsky <dev@brotsky.com>"]
-description = "Secret portal file credential store for keyring"
+description = "Secret-encrypted file credential store for keyring"
 homepage = "https://github.com/open-source-cooperative/keyring-rs/wiki/Keyring"
-keywords = ["zbus", "portal", "credential-store", "keyring"]
+keywords = ["encryption", "credential-store", "keyring"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/open-source-cooperative/zbus-secret-portal-keyring-store.git"
+repository = "https://github.com/open-source-cooperative/secret-file-keyring-store.git"
 rust-version = "1.88"
 exclude = [".github/"]
 readme = "README.md"
-name = "zbus-secret-portal-keyring-store"
+name = "secret-file-keyring-store"
 version = "1.0.0"
 edition = "2024"
 
@@ -22,7 +22,6 @@ tempfile = "3"
 rustix = { version = "1", features = ["fs"] }
 rand = "0.10"
 keyring-core = "1"
-zbus = "5"
 
 [dev-dependencies]
 fastrand = "2"

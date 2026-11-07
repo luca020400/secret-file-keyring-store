@@ -7,13 +7,12 @@ use regex::Regex;
 use sscanf::sscanf;
 
 use keyring_core::{Entry, Error, Result, set_default_store};
-use zbus_secret_portal_keyring_store::Store;
+use secret_file_keyring_store::Store;
 
 fn main() -> Result<()> {
-    set_default_store(Store::new_with_configuration(&HashMap::from([(
-        "keyring-file",
-        "./keyring-store.json",
-    )]))?);
+    // Supply the same application secret on each run.
+    let secret = std::env::var("KEYRING_STORE_SECRET").expect("set KEYRING_STORE_SECRET");
+    set_default_store(Store::new("./keyring-store.json", secret.as_bytes())?);
     let (names, entries) = find_candidates()?;
     let args = std::env::args().skip(1).collect::<Vec<String>>();
     if args.len() > 1 {

@@ -3,7 +3,7 @@
 Shared credential backend access.
 
 This module provides read/write-lock-protected shared access from credentials
-to the secret portal file store. Each store holds the singleton used by its creds.
+to the encrypted file store. Each store holds the singleton used by its creds.
 
 */
 
@@ -13,18 +13,18 @@ use std::sync::RwLock;
 
 use keyring_core::Result;
 
-mod portal;
+mod file;
 
-use portal::PortalService;
+use file::FileService;
 
 pub(crate) struct Service {
-    store: RwLock<PortalService>,
+    store: RwLock<FileService>,
 }
 
 impl Service {
-    pub(crate) fn new(keyring_file: &Path) -> Result<Self> {
+    pub(crate) fn new(keyring_file: &Path, secret: &[u8]) -> Result<Self> {
         Ok(Self {
-            store: RwLock::new(PortalService::new(keyring_file)?),
+            store: RwLock::new(FileService::new(keyring_file, secret)?),
         })
     }
 

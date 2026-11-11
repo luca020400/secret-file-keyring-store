@@ -17,6 +17,7 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 
 use serde::{Deserialize, Serialize};
+use serde_with::{base64::Base64, serde_as};
 
 use crate::errors::platform_failure;
 use keyring_core::error::{Error, Result};
@@ -317,13 +318,17 @@ fn derive(secret: &[u8], salt: &[u8; SALT_LEN]) -> [u8; KEY_LEN] {
     key
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope {
     version: u32,
     next_id: u64,
+    #[serde_as(as = "Base64")]
     salt: [u8; SALT_LEN],
+    #[serde_as(as = "Base64")]
     nonce: [u8; NONCE_LEN],
+    #[serde_as(as = "Base64")]
     ciphertext: Vec<u8>,
 }
 
@@ -335,8 +340,10 @@ fn aad(salt: &[u8; SALT_LEN], next_id: u64) -> Vec<u8> {
     aad
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize)]
 struct Record {
+    #[serde_as(as = "Base64")]
     secret: Vec<u8>,
     id: u64,
     label: String,
